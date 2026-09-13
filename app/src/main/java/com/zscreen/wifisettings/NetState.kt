@@ -47,22 +47,37 @@ object NetState {
      * interface, which no ROM can hide.
      */
     fun isApActive(context: Context): Boolean {
-        val wifi = wifiManager(context)
-        if (wifi != null) {
-            try {
-                val m = WifiManager::class.java.getDeclaredMethod("getWifiApState")
-                m.isAccessible = true
-                val state = m.invoke(wifi) as Int
-                // ICS+ uses 10..14 (ENABLING 12, ENABLED 13); pre-ICS used 0..4.
-                if (state == 12 || state == 13 || state == 2 || state == 3) {
-                    Log.i(TAG, "softAP up (state=$state) -- staying out of the way")
-                    return true
-                }
-                return false
-            } catch (e: Exception) {
-                Log.w(TAG, "getWifiApState() unavailable, falling back to interfaces", e)
+        val wifi = wifiManager(context) ?: return hasLiveApInterface()
+
+        // Primary: the same call ZLauncher's KeepAliveService uses to decide whether to
+        // tear the tunnel down. Both are @hide, but this one is already proven on this
+        // hardware, so it leads rather than the state-int variant below.
+        try {
+            val m = WifiManager::class.java.getMethod("isWifiApEnabled")
+            val on = m.invoke(wifi) as? Boolean
+            if (on != null) {
+                if (on) Log.i(TAG, "softAP up (isWifiApEnabled) -- staying out of the way")
+                return on
             }
+        } catch (e: Exception) {
+            Log.w(TAG, "isWifiApEnabled() unavailable, trying getWifiApState()", e)
         }
+
+        // Secondary: the state int, for ROMs that kept one and not the other.
+        try {
+            val m = WifiManager::class.java.getDeclaredMethod("getWifiApState")
+            m.isAccessible = true
+            val state = m.invoke(wifi) as Int
+            // ICS+ uses 10..14 (ENABLING 12, ENABLED 13); pre-ICS used 0..4.
+            if (state == 12 || state == 13 || state == 2 || state == 3) {
+                Log.i(TAG, "softAP up (state=$state) -- staying out of the way")
+                return true
+            }
+            return false
+        } catch (e: Exception) {
+            Log.w(TAG, "getWifiApState() unavailable, falling back to interfaces", e)
+        }
+
         return hasLiveApInterface()
     }
 

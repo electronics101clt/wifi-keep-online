@@ -43,10 +43,14 @@ naive "Wi-Fi is off, I'll turn it on" read is exactly backwards at that moment. 
 check therefore runs *first* on every pass, and if the AP appears after we enabled the
 radio, we switch it back off and hand the chip back.
 
-`NetState.isApActive()` reads `WifiManager.getWifiApState()` by reflection — it's
-`@hide`, but this targets Oreo, where hidden-API reflection still works (the greylist
-clampdown landed in Android 9). If that fails it falls back to looking for a live
-softAP interface (`ap0`, `swlan0`, `wlan1`), which no ROM can hide.
+`NetState.isApActive()` leads with `WifiManager.isWifiApEnabled()` by reflection — the
+same call ZLauncher's `KeepAliveService` uses to decide whether to tear its tunnel down,
+so it is already proven on this hardware. It falls back to the `getWifiApState()` state
+int, then to looking for a live softAP interface (`ap0`, `swlan0`, `wlan1`), which no ROM
+can hide. All `@hide`, which is fine on Oreo — the greylist clampdown landed in Android 9.
+
+Both apps agree on this rule, from opposite ends: ZLauncher tears the tunnel down when the
+hotspot comes up, and this app refuses to touch the radio for the same reason.
 
 ## What each pass does
 
@@ -150,6 +154,20 @@ system Wi-Fi settings page (falling back to the
 `com.android.settings/.wifi.WifiSettings` component, then the top-level settings list).
 
 Either way it makes sure the watcher is running.
+
+## Division of labour with ZLauncher
+
+ZLauncher deliberately makes **no** `WifiManager` writes at all — no `enableNetwork()`,
+no toggling; association is entirely WifiManager's business as far as it is concerned. It
+only watches the SSID and builds or destroys the tunnel off it.
+
+This app is the other half: it does the radio writes ZLauncher won't, and stops at the
+point ZLauncher takes over. Neither one touches the other's job.
+
+One consequence worth knowing: ZLauncher builds a tunnel only when the connected SSID
+contains "pdanet". If this app gets the unit onto some other network, the handoff still
+happens and ZLauncher still comes forward — it just won't raise a tunnel, which is correct
+behaviour, not a failure.
 
 ## Build & install
 
