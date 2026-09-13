@@ -41,6 +41,9 @@ class WifiWatchService : Service() {
     /** When the AP last went away -- we hold off briefly so we don't race its teardown. */
     private var apEndedAt = 0L
 
+    /** Was the hotspot up on the previous pass? Used to spot the moment it clears. */
+    private var wasApActive = false
+
     private var lastNote: String? = null
 
     /** Have we seen the unit offline yet this service lifetime? */
@@ -149,9 +152,24 @@ class WifiWatchService : Service() {
             }
             apEndedAt = 0L
             strikes = 0
+            wasApActive = true
             update(getString(R.string.state_carplay))
             schedule(AP_POLL_MS)
             return
+        }
+
+        // The hotspot just cleared. Whatever we had given up on before it appeared no
+        // longer applies -- the chip is ours again, and the radio was very likely torn
+        // down by the AP rather than by anything the user decided. So this is a fresh
+        // episode: retry Wi-Fi, and let the menu come up again if that retry fails.
+        if (wasApActive) {
+            Log.i(TAG, "hotspot cleared -- fresh attempt")
+            wasApActive = false
+            handedToUser = false
+            homeSent = false
+            strikes = 0
+            lastKick = 0L
+            confirmations = 0
         }
         if (apEndedAt == 0L) apEndedAt = now
         val sinceAp = now - apEndedAt
