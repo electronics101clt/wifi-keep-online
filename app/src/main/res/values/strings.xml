@@ -9,6 +9,7 @@
     <string name="state_connecting">Wi-Fi on, connecting…</string>
     <string name="state_verifying">Checking connection…</string>
     <string name="state_waiting">No network in range</string>
+    <string name="state_waiting_user">Waiting for you to pick a network</string>
     <string name="state_carplay">Hotspot in use — standing by</string>
     <string name="state_blocked">Cannot switch Wi-Fi on</string>
 

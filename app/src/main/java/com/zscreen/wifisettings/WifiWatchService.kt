@@ -52,8 +52,16 @@ class WifiWatchService : Service() {
     /** Consecutive passes where the Wi-Fi link checked out, before we hand off. */
     private var confirmations = 0
 
-    /** The menu is put up at most once per service lifetime. */
-    private var menuShown = false
+    /**
+     * Once the menu has gone up we stop touching the radio and wait for the user.
+     *
+     * Fighting for control is the thing that could break Android Auto or CarPlay: a
+     * service that keeps flipping Wi-Fi back on every 20s is exactly what you do not
+     * want running underneath a projection session. One automatic attempt, one prompt,
+     * then hands off the decision. Cleared the moment a connection appears, so a later
+     * dropout gets a fresh attempt of its own.
+     */
+    private var handedToUser = false
 
     private val events = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -150,6 +158,10 @@ class WifiWatchService : Service() {
             // yank the driver out of whatever they were using. homeSent keeps it to the
             // first connection only, for the same reason: a mid-drive reconnect is not
             // an "initial screen".
+            // Connected again -- the user (or the framework) sorted it out. Re-arm, so
+            // the next dropout gets its own single attempt and its own single prompt.
+            handedToUser = false
+
             if (sawOffline && !homeSent) {
                 if (!NetState.isWifiConnected(this)) {
                     // Online, but through the modem or a dongle rather than Wi-Fi.
@@ -196,24 +208,49 @@ class WifiWatchService : Service() {
         //    auto-join a saved network on its own. Let it. Just don't call it a
         //    failure until association has had a fair shot.
         if (NetState.isWifiOn(this)) {
-            val sinceKick = now - lastKick
-            if (lastKick != 0L && sinceKick < ASSOCIATE_MS) {
+            // Progress beats the clock. Measured on an AC8257, association from a cold
+            // radio takes ~34s -- so a fixed 30s window declared a miss and put the menu
+            // up four seconds before the connection completed on its own. While the
+            // supplicant is working, keep waiting however long it takes.
+            if (NetState.isAssociating(this)) {
                 update(getString(R.string.state_connecting))
-                schedule(ASSOCIATE_MS - sinceKick)
-            } else {
-                // The radio is on and nothing saved was in range long enough to join.
-                // That is the point the automatic path has nothing left to try, so put
-                // the menu in front of the user -- once.
-                if (lastKick != 0L) strikes++
-                lastKick = 0L
-                showMenuOnce()
-                update(getString(R.string.state_waiting))
-                schedule(retryDelay())
+                schedule(CONFIRM_MS)
+                return
             }
+
+            if (lastKick != 0L && now - lastKick < ASSOCIATE_MS) {
+                // Poll, do not sleep the window out. Sleeping meant a connection that
+                // landed at 34s went unnoticed until the window expired, so the menu
+                // went up over a unit that was already online.
+                update(getString(R.string.state_connecting))
+                schedule(WAIT_POLL_MS)
+                return
+            }
+
+            // Radio on, nothing joined. Count the miss every cycle -- this used to be
+            // gated on lastKick != 0, which zeroed itself on the first miss, so strikes
+            // could never reach the menu threshold and the app sat here doing nothing
+            // forever. Found by leaving a unit offline and watching it never recover.
+            strikes++
+            lastKick = 0L
+            // Not on the first miss. Measured association on an AC8257 ranged 34-69s and
+            // is not reliably bounded, so one slow attempt must not be enough to put the
+            // menu over a connection that is still coming up.
+            if (strikes >= STRIKES_BEFORE_MENU) showMenuOnce()
+            update(getString(R.string.state_waiting))
+            schedule(retryDelay())
             return
         }
 
-        // 5. Offline and the radio is off. This is the whole point of the app.
+        // 5. Offline and the radio is off. This is the whole point of the app -- unless
+        // we already asked the user, in which case the radio being off may well be their
+        // doing and we leave it alone.
+        if (handedToUser) {
+            update(getString(R.string.state_waiting_user))
+            schedule(retryDelay())
+            return
+        }
+
         val ok = NetState.setWifi(this, true)
         Log.i(TAG, "kick: setWifiEnabled(true) -> $ok (strikes=$strikes)")
         if (ok) {
@@ -225,6 +262,8 @@ class WifiWatchService : Service() {
             // Android 10/11: setWifiEnabled() is a no-op for third-party apps, so there
             // is no automatic path at all. The menu is not a fallback here, it is the
             // only way the radio gets switched on.
+            // No strike gate here: setWifiEnabled() refusing is not a slow network, it
+            // is Android 10/11 telling us there is no automatic path at all.
             strikes++
             showMenuOnce()
             update(getString(R.string.state_blocked))
@@ -233,12 +272,12 @@ class WifiWatchService : Service() {
     }
 
     private fun showMenuOnce() {
-        if (menuShown) return
+        if (handedToUser) return
         if (!Home.canStartFromBackground(this)) {
             Log.w(TAG, "cannot put the menu up from the background on this version")
             return
         }
-        menuShown = true
+        handedToUser = true
         WifiMenu.open(this)
     }
 
@@ -283,14 +322,28 @@ class WifiWatchService : Service() {
     }
 
     companion object {
-        private const val TAG = "WifiSettings"
+        private const val TAG = "ZWifiKeep"
         private const val CHANNEL = "wifi_watch"
         private const val NOTE_ID = 1
 
         /** Let the system settle after boot before the first look. */
         private const val FIRST_LOOK_MS = 8_000L
-        /** How long association + DHCP is allowed to take before it counts as a miss. */
-        private const val ASSOCIATE_MS = 30_000L
+        /**
+         * How long a kicked radio gets before the attempt counts as a miss.
+         *
+         * Measured on an AC8257: association from a cold radio took 34s, 49s, 57s and
+         * 69s across four runs. It is not reliably bounded, and the supplicant reports
+         * DISCONNECTED the whole way through before jumping straight to CONNECTED, so
+         * there is no progress signal to watch on this ROM. Hence a generous window,
+         * polled throughout, plus a strike gate before anything interrupts the user.
+         */
+        private const val ASSOCIATE_MS = 120_000L
+
+        /** How often to look while waiting on association. */
+        private const val WAIT_POLL_MS = 5_000L
+
+        /** Misses required before the menu goes up. */
+        private const val STRIKES_BEFORE_MENU = 2
         private const val IDLE_POLL_MS = 20_000L
         private const val AP_POLL_MS = 15_000L
         private const val AP_COOLDOWN_MS = 15_000L

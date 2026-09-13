@@ -2,6 +2,7 @@ package com.zscreen.wifisettings
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
 import android.util.Log
@@ -9,14 +10,13 @@ import android.util.Log
 /**
  * The handoff: bring the launcher forward so it can wire the VPN tunnel up.
  *
- * ZLauncher (`app.lawnchair`, a Lawnchair fork) carries the tunnel in its own
- * `app.lawnchair.service.KeepAliveService`. We do not reach into that service -- it is
- * another app's component and not ours to start. Foregrounding the launcher is the whole
- * handoff; it wires its own tun from there.
+ * Goes to whatever is set as the home app -- no hard-coded package. On this unit that
+ * resolves to ZLauncher (`app.lawnchair`), which carries the tunnel in its own
+ * `app.lawnchair.service.KeepAliveService`, but the choice belongs to whoever set the
+ * launcher, not to this app. Change the home app and the handoff follows it.
  *
- * We target ZLauncher explicitly when it is installed, because a plain CATEGORY_HOME
- * only lands on it if it happens to be the *default* home app. If it is not installed,
- * or the explicit start fails, this falls back to whatever home is set.
+ * We do not reach into KeepAliveService -- it is another app's component and not ours to
+ * start. Foregrounding the launcher is the whole handoff; it wires its own tun from there.
  *
  * Not an injected keypress either way: KEYCODE_HOME needs INJECT_EVENTS (a signature
  * permission) and `input keyevent 3` needs root.
@@ -29,8 +29,7 @@ import android.util.Log
  */
 object Home {
 
-    private const val TAG = "WifiSettings"
-    private const val ZLAUNCHER = "app.lawnchair"
+    private const val TAG = "ZWifiKeep"
 
     fun go(context: Context): Boolean {
         if (!canStartFromBackground(context)) {
@@ -38,38 +37,28 @@ object Home {
                     "activity starts without SYSTEM_ALERT_WINDOW")
             return false
         }
-
-        zlauncherHome(context)?.let { explicit ->
-            if (start(context, explicit, "ZLauncher")) return true
+        val intent = homeIntent()
+        return try {
+            context.startActivity(intent)
+            Log.i(TAG, "handoff -> ${resolvedHome(context) ?: "home"}")
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "handoff failed", e)
+            false
         }
-        return start(context, homeIntent(), "default home")
     }
 
     private fun homeIntent() = Intent(Intent.ACTION_MAIN)
         .addCategory(Intent.CATEGORY_HOME)
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
-    /** ZLauncher's own HOME activity, if it is installed on this unit. */
-    private fun zlauncherHome(context: Context): Intent? = try {
+    /** Only for the log line -- which launcher actually took the handoff. */
+    private fun resolvedHome(context: Context): String? = try {
         context.packageManager
-            .queryIntentActivities(homeIntent(), 0)
-            .firstOrNull { it.activityInfo?.packageName == ZLAUNCHER }
-            ?.activityInfo
-            ?.let { info ->
-                homeIntent().setClassName(info.packageName, info.name)
-            }
+            .resolveActivity(homeIntent(), PackageManager.MATCH_DEFAULT_ONLY)
+            ?.activityInfo?.packageName
     } catch (e: Exception) {
-        Log.w(TAG, "Could not look up $ZLAUNCHER", e)
         null
-    }
-
-    private fun start(context: Context, intent: Intent, what: String): Boolean = try {
-        context.startActivity(intent)
-        Log.i(TAG, "handoff -> $what")
-        true
-    } catch (e: Exception) {
-        Log.w(TAG, "handoff to $what failed", e)
-        false
     }
 
     /** Below API 29 there is no background-start restriction to work around. */

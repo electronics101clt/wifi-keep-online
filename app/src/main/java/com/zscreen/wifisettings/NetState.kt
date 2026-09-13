@@ -20,7 +20,7 @@ import java.net.NetworkInterface
  */
 object NetState {
 
-    private const val TAG = "WifiSettings"
+    private const val TAG = "ZWifiKeep"
 
     /** Any usable network at all -- Wi-Fi, the built-in modem, a USB dongle. */
     @Suppress("DEPRECATION")
@@ -118,6 +118,28 @@ object NetState {
         val hasIp = info.ipAddress != 0
         Log.d(TAG, "wifi link: associated=$associated network=$onNetwork ip=$hasIp")
         return associated && onNetwork && hasIp
+    }
+
+    /**
+     * Is the supplicant actively working on a connection right now?
+     *
+     * Measured on an AC8257 unit, association from a cold radio takes about 34 seconds
+     * -- longer than any timeout worth hard-coding. So the wait is driven by progress
+     * rather than by a clock: while the supplicant is scanning its way through the
+     * handshake there is nothing wrong and nothing for the user to do, and putting the
+     * menu up would interrupt a connection that is seconds from completing.
+     */
+    @Suppress("DEPRECATION")
+    fun isAssociating(context: Context): Boolean {
+        val state = wifiManager(context)?.connectionInfo?.supplicantState ?: return false
+        val busy = state == SupplicantState.ASSOCIATING ||
+                state == SupplicantState.ASSOCIATED ||
+                state == SupplicantState.AUTHENTICATING ||
+                state == SupplicantState.FOUR_WAY_HANDSHAKE ||
+                state == SupplicantState.GROUP_HANDSHAKE ||
+                state == SupplicantState.COMPLETED
+        Log.d(TAG, "supplicant: $state (busy=$busy)")
+        return busy
     }
 
     /**

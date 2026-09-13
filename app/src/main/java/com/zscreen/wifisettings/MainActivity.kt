@@ -37,6 +37,14 @@ class MainActivity : Activity() {
         WifiWatchService.start(this)
         Watchdog.arm(this)
 
+        // Queued before the early returns below, not after. Previously these sat past
+        // the already-connected return, so on a healthy unit -- the normal case -- the
+        // battery-optimisation grant was never once requested, and the service ran
+        // unprotected forever. Measured on an AC8257: whitelist empty, oom_score_adj
+        // 200. The grants are the whole reason the ROM leaves us alone, so they have to
+        // be asked for on a good boot, not only on a broken one.
+        queueOneTimeGrants()
+
         // CarPlay first, as everywhere else in this app: while the hotspot is up
         // getWifiState() reports DISABLED, so checking Wi-Fi first would read the
         // situation exactly backwards. Nothing to do and nothing to hand off.
@@ -44,6 +52,7 @@ class MainActivity : Activity() {
             dismiss(R.string.toast_hotspot, home = false)
             return
         }
+
 
         // Already connected: dismiss and continue -- close up and go to the home
         // screen, so ZLauncher is in front and can get on with the tunnel.
@@ -55,7 +64,6 @@ class MainActivity : Activity() {
         // Otherwise the service takes it from here: switch the radio on and let the
         // framework join a saved profile if one is visible. The menu is not opened
         // here -- it only goes up if that automatic path runs out of things to try.
-        queueOneTimeGrants()
         step()
     }
 
@@ -75,9 +83,19 @@ class MainActivity : Activity() {
         if (SystemClock.elapsedRealtime() > BOOT_WINDOW_MS) {
             Toast.makeText(applicationContext, resId, Toast.LENGTH_SHORT).show()
         }
+        // Outstanding grants still get asked for -- they are what keeps the service
+        // alive, and a connected unit is the calmest moment to ask.
+        if (prompts.isNotEmpty()) {
+            pendingHome = home
+            step()
+            return
+        }
         if (home) Home.go(this)
         finish()
     }
+
+    /** Whether to go home once the grant prompts are done. */
+    private var pendingHome = false
 
     override fun onResume() {
         super.onResume()
@@ -93,6 +111,7 @@ class MainActivity : Activity() {
         while (prompts.isNotEmpty()) {
             if (start(prompts.removeFirst())) return
         }
+        if (pendingHome) Home.go(this)
         finish()
     }
 
@@ -139,7 +158,7 @@ class MainActivity : Activity() {
     }
 
     private companion object {
-        const val TAG = "WifiSettings"
+        const val TAG = "ZWifiKeep"
         const val KEY_ASKED_BATTERY = "asked_battery_whitelist"
         const val KEY_ASKED_OVERLAY = "asked_overlay"
         /** Launches this soon after boot are the radio's autostart, not a finger. */

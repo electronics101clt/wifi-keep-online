@@ -16,7 +16,7 @@ import android.util.Log
  */
 object Watchdog {
 
-    private const val TAG = "WifiSettings"
+    private const val TAG = "ZWifiKeep"
     const val ACTION_POKE = "com.zscreen.wifisettings.POKE"
     private const val EVERY_MS = 15 * 60 * 1000L
 

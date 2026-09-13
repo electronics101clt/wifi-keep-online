@@ -21,7 +21,7 @@ import android.util.Log
  */
 object WifiMenu {
 
-    private const val TAG = "WifiSettings"
+    private const val TAG = "ZWifiKeep"
 
     fun open(context: Context): Boolean {
         // 1. The slide-up Wi-Fi panel, on the versions that have it (API 29+).

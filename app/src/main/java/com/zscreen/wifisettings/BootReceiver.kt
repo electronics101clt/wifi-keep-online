@@ -26,6 +26,6 @@ class BootReceiver : BroadcastReceiver() {
     }
 
     private companion object {
-        const val TAG = "WifiSettings"
+        const val TAG = "ZWifiKeep"
     }
 }
