@@ -6,6 +6,32 @@ gets out of the way.
 
 Register it in the radio's own **boot item / autostart** list.
 
+## The cycle
+
+```
+             boot item launches the app
+                        |
+         +--------------+--------------+
+         |  hotspot up?  -> yes: fall silent, stay off the screen
+         |  wifi already connected? -> yes: fall silent
+         +--------------+--------------+
+                        | no to both
+                   ENTER DIALOG
+              (system Wi-Fi settings page)
+                        |
+              service kicks the radio on
+              framework auto-joins a saved network
+                        |
+                 verify the link:
+        associated + saved networkId + has IP
+        + still there 4s later + validated (20s grace)
+                        |
+                    LEAVE
+          handoff -> ZLauncher (app.lawnchair)
+                        |
+        ZLauncher's KeepAliveService wires the tunnel
+```
+
 ## The one rule that overrides everything
 
 **If the unit is running its own hotspot, do nothing.** A softAP on these units means
@@ -46,14 +72,24 @@ a head unit, so a scan-based approach would silently return an empty list foreve
 If nothing is in range, the radio is deliberately left **on** so the framework keeps
 retrying on its own as you drive back into coverage.
 
-## The HOME handoff
+## The handoff
 
-When the first connection lands, the service presses HOME so ZLauncher comes forward and
-wires the tun up. That also clears the Wi-Fi settings page the boot item left on screen —
-the "initial screen" has its connection, so it gets out of the way.
+When the first connection verifies, the service goes HOME so ZLauncher comes forward and
+its `app.lawnchair.service.KeepAliveService` wires the tunnel. That also clears the Wi-Fi
+settings page off the screen — the "initial screen" has its connection, so it gets out of
+the way.
+
+ZLauncher is set as the home app on the unit, so a plain `CATEGORY_HOME` reaches it. It is
+still targeted **explicitly** first (`app.lawnchair`), with `CATEGORY_HOME` as the
+fallback, because these ROMs have a habit of taking default-home back after an update and
+the handoff has to reach the app that owns the tunnel either way.
+
+It does **not** reach into `KeepAliveService` directly — that is another app's component
+and not ours to start. Foregrounding the launcher is the whole handoff; it wires its own
+tun from there.
 
 Not an injected keypress: `KEYCODE_HOME` needs `INJECT_EVENTS` (signature-level) and
-`input keyevent 3` needs root. Launching `CATEGORY_HOME` does the same job with no
+`input keyevent 3` needs root. Launching the home activity does the same job with no
 permission.
 
 **Android 10/11 caveat.** Background activity starts are blocked there, and — contrary to
@@ -107,14 +143,13 @@ enough:
 
 ## Tapping the icon
 
-Opens the system Wi-Fi settings page (with fallbacks to the
-`com.android.settings/.wifi.WifiSettings` component, then the top-level settings list)
-and makes sure the service is running.
+Same entry test as the boot item — those lists launch the launcher activity, so it is
+literally the same code path. If a hotspot is up or Wi-Fi is already connected, it says so
+in a toast and gets out of the way instead of taking the screen. Otherwise it opens the
+system Wi-Fi settings page (falling back to the
+`com.android.settings/.wifi.WifiSettings` component, then the top-level settings list).
 
-The head unit's boot-item list calls this same activity — those lists launch the launcher
-activity — so the Wi-Fi page does appear at boot. That is fine: the HOME handoff above
-clears it as soon as the connection lands. When a person taps the icon instead, nothing
-presses HOME and the page stays put.
+Either way it makes sure the watcher is running.
 
 ## Build & install
 
@@ -135,4 +170,5 @@ hardware. The three things most likely to need adjusting on a specific ROM:
 
 - the reflection path in `isApActive()`,
 - the softAP interface names it falls back to,
-- whether the ROM's launcher honours `CATEGORY_HOME` the way stock does.
+- whether the handoff lands on ZLauncher — `logcat` prints `handoff -> ZLauncher` or
+  `handoff -> default home`, which tells you immediately.

@@ -11,5 +11,7 @@
     <string name="state_carplay">Hotspot in use — standing by</string>
     <string name="state_blocked">Cannot switch Wi-Fi on</string>
 
+    <string name="toast_connected">Wi-Fi already connected</string>
+    <string name="toast_hotspot">Hotspot in use — leaving Wi-Fi alone</string>
     <string name="no_settings_app">No settings app found on this device</string>
 </resources>

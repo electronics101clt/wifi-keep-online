@@ -14,15 +14,16 @@ import android.widget.Toast
 
 /**
  * The launcher entry, and also what the head unit's boot-item list calls -- those lists
- * launch the launcher activity. Two jobs, no UI of its own:
+ * launch the launcher activity. No UI of its own.
  *
- *  1. Make sure the watcher is running.
- *  2. Open the system Wi-Fi settings screen.
+ * It starts the watcher, then enters the Wi-Fi dialog only when there is something to
+ * fix: **no Wi-Fi connected and no hotspot up**. A hotspot means wireless CarPlay has
+ * the chip and we stay off the screen entirely; an existing connection means there is
+ * nothing to do. Either way it falls silent with a toast rather than taking the display.
  *
- * At boot that leaves the Wi-Fi page sitting on screen, which is fine: it is the
- * "initial screen", and [WifiWatchService] presses HOME off it the moment the
- * connection lands. When a person taps the icon instead, nothing presses HOME and the
- * page stays put, which is what they wanted.
+ * When it does enter, the dialog is the "initial screen", and [WifiWatchService] hands
+ * off out of it -- to ZLauncher, which finishes the job by wiring the tunnel -- as soon
+ * as the connection verifies.
  *
  * First run only, it walks one-time grants that keep the ROM from reaping the service.
  */
@@ -37,9 +38,26 @@ class MainActivity : Activity() {
         WifiWatchService.start(this)
         Watchdog.arm(this)
 
+        // Enter only when there is something to fix. CarPlay first, as everywhere else
+        // in this app: while the hotspot is up getWifiState() reports DISABLED, so
+        // checking Wi-Fi first would read the situation exactly backwards.
+        if (NetState.isApActive(this)) {
+            toast(R.string.toast_hotspot)
+            finish()
+            return
+        }
+        if (NetState.isWifiConnected(this)) {
+            toast(R.string.toast_connected)
+            finish()
+            return
+        }
+
         queueOneTimeGrants()
         step()
     }
+
+    private fun toast(resId: Int) =
+        Toast.makeText(applicationContext, resId, Toast.LENGTH_SHORT).show()
 
     override fun onResume() {
         super.onResume()
