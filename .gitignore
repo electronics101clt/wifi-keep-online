@@ -9,3 +9,8 @@ captures/
 .cxx/
 
 # keep the built APK at the repo root (wifi-settings-opener.apk) — it is the deliverable
+
+# Signing — never commit these. The repo is public.
+keystore.properties
+*.jks
+*.keystore

@@ -211,8 +211,19 @@ failure.
 
 ## Build & install
 
-    ./gradlew assembleDebug
-    adb install -r wifi-settings-opener.apk
+    ./gradlew assembleRelease
+    adb install -r wifi-bootstrap.apk
+
+`wifi-bootstrap.apk` at the repo root is the signed release build (`CN=ZScreen`,
+SHA-256 `686f90d4…`), v1+v2 signed — v1 is included because these head-unit ROMs ship
+modified package installers and some still want a JAR signature.
+
+Signing is configured through `keystore.properties` at the repo root, which is
+**gitignored**, as is the keystore itself (which lives outside the tree entirely). A
+fresh clone without it still builds; the release APK just comes out unsigned rather than
+the build failing.
+
+Installing over a debug build needs an uninstall first — different signature.
 
 ## Icon
 

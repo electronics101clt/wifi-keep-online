@@ -3,6 +3,16 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+// Signing config lives outside the repo -- keystore.properties is gitignored and the
+// keystore itself is never inside the tree. A fresh clone without it still builds; the
+// release build just comes out unsigned rather than failing.
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+def keystoreProperties = new Properties()
+def hasSigningConfig = keystorePropertiesFile.exists()
+if (hasSigningConfig) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 android {
     namespace 'com.zscreen.wifisettings'
     compileSdk 34
@@ -15,8 +25,27 @@ android {
         versionName "1.0"
     }
 
+    signingConfigs {
+        release {
+            if (hasSigningConfig) {
+                // v1 as well as v2: minSdk 26 only needs v2, but these head-unit ROMs
+                // ship modified package installers and some still want a JAR signature.
+                // Costs nothing to include both.
+                enableV1Signing true
+                enableV2Signing true
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (hasSigningConfig) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
