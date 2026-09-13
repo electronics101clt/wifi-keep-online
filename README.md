@@ -12,8 +12,8 @@ Register it in the radio's own **boot item / autostart** list.
              boot item launches the app
                         |
          +--------------+--------------+
-         |  hotspot up?  -> yes: fall silent, stay off the screen
-         |  wifi already connected? -> yes: fall silent
+         |  hotspot up?  -> yes: dismiss, stay off the screen
+         |  wifi already connected? -> yes: dismiss
          +--------------+--------------+
                         | no to both
                    ENTER DIALOG
@@ -148,10 +148,17 @@ enough:
 ## Tapping the icon
 
 Same entry test as the boot item — those lists launch the launcher activity, so it is
-literally the same code path. If a hotspot is up or Wi-Fi is already connected, it says so
-in a toast and gets out of the way instead of taking the screen. Otherwise it opens the
-system Wi-Fi settings page (falling back to the
-`com.android.settings/.wifi.WifiSettings` component, then the top-level settings list).
+literally the same code path. If a hotspot is up or Wi-Fi is already connected, it
+dismisses without taking the screen. Otherwise it opens the system Wi-Fi settings page
+(falling back to the `com.android.settings/.wifi.WifiSettings` component, then the
+top-level settings list).
+
+The dismiss is **silent at boot** and shows a toast on a finger tap. A toast popping over
+the radio's UI at every startup is exactly the noise this app exists to avoid, but on a
+deliberate tap it is the difference between "already connected" and a dead icon. Both
+arrive as the same MAIN/LAUNCHER intent, so time since boot (3 min) is the only thing
+separating them — a wrong guess costs one stray toast or one missing one, which is why the
+heuristic is allowed here and nowhere that matters.
 
 Either way it makes sure the watcher is running.
 

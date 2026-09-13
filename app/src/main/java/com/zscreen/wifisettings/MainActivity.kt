@@ -8,6 +8,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.PowerManager
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
@@ -42,13 +43,11 @@ class MainActivity : Activity() {
         // in this app: while the hotspot is up getWifiState() reports DISABLED, so
         // checking Wi-Fi first would read the situation exactly backwards.
         if (NetState.isApActive(this)) {
-            toast(R.string.toast_hotspot)
-            finish()
+            dismiss(R.string.toast_hotspot)
             return
         }
         if (NetState.isWifiConnected(this)) {
-            toast(R.string.toast_connected)
-            finish()
+            dismiss(R.string.toast_connected)
             return
         }
 
@@ -56,8 +55,24 @@ class MainActivity : Activity() {
         step()
     }
 
-    private fun toast(resId: Int) =
-        Toast.makeText(applicationContext, resId, Toast.LENGTH_SHORT).show()
+    /**
+     * Nothing to do, so get off the screen.
+     *
+     * Silent at boot: a toast popping over the radio's UI on every startup is exactly
+     * the noise this app is supposed to avoid. When a person taps the icon instead, the
+     * toast is the difference between "already connected" and a dead icon.
+     *
+     * The boot-item list and a finger tap arrive as the same MAIN/LAUNCHER intent, so
+     * time since boot is the only thing separating them. Getting it wrong costs one
+     * stray toast or one missing one, which is a fair price for not guessing on
+     * anything that matters.
+     */
+    private fun dismiss(resId: Int) {
+        if (SystemClock.elapsedRealtime() > BOOT_WINDOW_MS) {
+            Toast.makeText(applicationContext, resId, Toast.LENGTH_SHORT).show()
+        }
+        finish()
+    }
 
     override fun onResume() {
         super.onResume()
@@ -139,5 +154,7 @@ class MainActivity : Activity() {
         const val TAG = "WifiSettings"
         const val KEY_ASKED_BATTERY = "asked_battery_whitelist"
         const val KEY_ASKED_OVERLAY = "asked_overlay"
+        /** Launches this soon after boot are the radio's autostart, not a finger. */
+        const val BOOT_WINDOW_MS = 3 * 60 * 1000L
     }
 }
