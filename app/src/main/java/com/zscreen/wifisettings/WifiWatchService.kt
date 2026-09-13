@@ -85,6 +85,15 @@ class WifiWatchService : Service() {
             addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION)
             // @hide constant, but the broadcast itself is public traffic on every ROM.
             addAction("android.net.wifi.WIFI_AP_STATE_CHANGED")
+            // ACTION_SCREEN_ON cannot be declared in a manifest by design, so it only
+            // works while we are alive -- which is exactly the case it is good for:
+            // the unit dimming and coming back without the ROM having killed us.
+            addAction(Intent.ACTION_SCREEN_ON)
+            // Vendor ACC-wake actions. A *dynamic* receiver is exempt from the O+
+            // implicit-broadcast restriction that makes these undeliverable in the
+            // manifest, so this is where they earn their keep: the unit sleeps, we
+            // survive, and we re-evaluate the moment it comes back.
+            Wake.ACTIONS.forEach { addAction(it) }
         }
         registerReceiver(events, filter)
 
@@ -126,6 +135,9 @@ class WifiWatchService : Service() {
 
     private fun evaluateNow() {
         val now = System.currentTimeMillis()
+        // Push the dead-man's switch out again. Cheap, and it means the alarm standing
+        // when we die is never more than EVERY_MS old.
+        Watchdog.arm(this)
 
         // 1. CarPlay first. Always. While the hotspot is up, getWifiState() lies and
         //    says DISABLED, so checking Wi-Fi before the AP would read it backwards.

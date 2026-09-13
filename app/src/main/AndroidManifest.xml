@@ -41,8 +41,16 @@
             android:name=".BootReceiver"
             android:enabled="true"
             android:exported="true">
+            <!-- Cold boot. Rare on a head unit; it sleeps far more than it boots. -->
             <intent-filter android:priority="1000">
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+            <!-- Quick-boot, which ROMs send as part of the boot sequence. The vendor
+                 ACC-wake actions are deliberately NOT here: measured on an AC8257,
+                 an implicit broadcast never reaches a manifest receiver at targetSdk
+                 26, even with the app alive. They are registered dynamically by
+                 WifiWatchService instead, where the restriction does not apply. -->
+            <intent-filter android:priority="1000">
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                 <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>

@@ -1,6 +1,6 @@
-# Wi-Fi Keep Online
+# WiFi Bootstrap
 
-A resident background watcher for cheap MTK Chinese head units on Android 8.0 (API 26).
+WiFi Bootstrap is a resident background watcher for cheap MTK Chinese head units on Android 8.0 (API 26).
 It watches for the *absence* of a connection and kicks the Wi-Fi radio back on, then
 gets out of the way.
 
@@ -146,6 +146,13 @@ It fires **once**, and only on a transition it actually watched happen:
   the driver out of whatever they were using.
 - `homeSent` — a mid-drive reconnect is not an "initial screen", so it does not re-fire.
 
+## Other head units
+
+These radios sleep on ACC-off far more often than they boot, and the ROM kills background
+apps when they do. The forum answer — register the vendor wake broadcast in your manifest
+— provably does not work for a normal app on this target. See
+[docs/CROSS-UNIT.md](docs/CROSS-UNIT.md) for what does, and for a porting checklist.
+
 ## Staying alive
 
 These ROMs ship "one-key clean" process killers, so the foreground service alone is not
@@ -155,9 +162,11 @@ enough:
   permanent notification, on an `IMPORTANCE_MIN` channel so it stays silent and collapsed
   at the bottom of the shade.
 - **`START_STICKY`** — the system restarts it.
-- **`AlarmManager` watchdog** (`Watchdog.kt`) — an inexact repeating alarm every 15 min
-  pokes the service back up. Starting an already-running service is a no-op, so this is
-  free when nothing is wrong.
+- **`AlarmManager` watchdog** (`Watchdog.kt`) — an exact, self-rescheduling dead-man's
+  switch. Re-armed every evaluation pass, so while the service lives it never fires; when
+  the service dies it pokes it back up within 5 minutes. This is the *only* revival that
+  works on an ordinary install, because its `PendingIntent` targets our own component and
+  explicit broadcasts escape the O+ implicit restriction.
 - **`onTaskRemoved`** → one-shot poke 3s later, for launchers that kill on clear-recents.
 - **`MY_PACKAGE_REPLACED`** → restart after reinstall.
 - **Battery-optimisation whitelist** — requested once, the first time you tap the icon.

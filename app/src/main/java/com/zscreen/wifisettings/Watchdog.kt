@@ -18,7 +18,15 @@ object Watchdog {
 
     private const val TAG = "ZWifiKeep"
     const val ACTION_POKE = "com.zscreen.wifisettings.POKE"
-    private const val EVERY_MS = 15 * 60 * 1000L
+    /**
+     * Five minutes, not fifteen. This is the worst case for how long a unit drives with
+     * no internet after the ROM kills us, and it is the *only* revival that works on an
+     * ordinary install: measured on an AC8257, vendor wake broadcasts never reach a
+     * manifest receiver, while this alarm's PendingIntent targets our own component
+     * explicitly and always lands. The app is battery-whitelisted, so Doze will not
+     * defer it.
+     */
+    private const val EVERY_MS = 5 * 60 * 1000L
 
     private fun pending(context: Context): PendingIntent {
         val intent = Intent(context, BootReceiver::class.java).setAction(ACTION_POKE)
@@ -27,15 +35,22 @@ object Watchdog {
 
     fun arm(context: Context) {
         val am = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
-        // Inexact on purpose -- the system batches it with other wakeups and we do not
-        // care whether the poke lands at 15:00 or 15:04.
-        am.setInexactRepeating(
-            AlarmManager.ELAPSED_REALTIME_WAKEUP,
-            SystemClock.elapsedRealtime() + EVERY_MS,
-            EVERY_MS,
-            pending(context)
-        )
-        Log.d(TAG, "watchdog armed")
+        // Exact, not setInexactRepeating. Measured on an AC8257, a 15-minute inexact
+        // repeat was batched into an 11-minute window -- worst case 25 minutes of
+        // driving with no internet after a kill. setExactAndAllowWhileIdle also ignores
+        // Doze, which matters because the alarm's whole job is to fire when we are dead.
+        //
+        // Re-armed on every evaluation pass rather than left repeating, so the alarm is
+        // always about EVERY_MS in the future. While the service is alive it therefore
+        // never fires, which is the point: it is a dead-man's switch, not a timer.
+        val at = SystemClock.elapsedRealtime() + EVERY_MS
+        try {
+            am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pending(context))
+        } catch (e: SecurityException) {
+            // Some ROMs cap exact alarms; an inexact one still beats nothing.
+            Log.w(TAG, "exact alarm refused, falling back", e)
+            am.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pending(context))
+        }
     }
 
     /** One-shot, for coming back after the task was swiped away. */
