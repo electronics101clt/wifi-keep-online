@@ -86,10 +86,15 @@ is no existing protocol to hook into.
 ## What is *not* on this network
 
 The ZConnect+ Remote / ZRemote-Receiver pair is a **separate project** and was not
-running. Its ports (`:8001` for remote-control commands host → client, UDP `:8002` for
-the client's `ZREMOTE_HELLO` announcements) belong to that design, not to PdaNet+.
-Probing found both closed, which is the expected result when those apps are not
-installed or not started — not evidence of anything being broken.
+running. Its ports belong to that software, not to this network:
+
+- `:8001` — the remote-control channel, host → client. It exists only while the remote
+  app is running. Nothing in PdaNet+ opens it, so on a plain PdaNet setup it is closed
+  by definition, not by failure.
+- UDP `:8002` — the client's `ZREMOTE_HELLO` announcements, same story.
+
+Probing found both closed, which is simply what a network without that software looks
+like.
 
 Worth keeping straight when reading ZLauncher's source too: its
 `KeepAliveService.PROXY_PORT = 8080` is a loopback-only server, bound explicitly to the
