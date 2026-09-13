@@ -214,9 +214,14 @@ failure.
     ./gradlew assembleRelease
     adb install -r wifi-bootstrap.apk
 
-`wifi-bootstrap.apk` at the repo root is the signed release build (`CN=ZScreen`,
-SHA-256 `686f90d4…`), v1+v2 signed — v1 is included because these head-unit ROMs ship
+`wifi-bootstrap.apk` at the repo root is the signed release build (`CN=ZScreen`, SHA-256
+`686f90d4…`), signed with **both v1 and v2** — v1 because these head-unit ROMs ship
 modified package installers and some still want a JAR signature.
+
+Note that `apksigner verify` reports `v1 scheme: false` on this APK. That is not a
+missing signature: with `minSdk 26`, apksigner does not exercise v1 at all, because v2
+arrived in API 24. The JAR signature is there — `META-INF/CERT.SF`, `CERT.RSA`,
+`MANIFEST.MF` — and `apksigner verify --min-sdk-version 21` confirms it verifies.
 
 Signing is configured through `keystore.properties` at the repo root, which is
 **gitignored**, as is the keystore itself (which lives outside the tree entirely). A
