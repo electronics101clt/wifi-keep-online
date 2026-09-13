@@ -13,21 +13,22 @@ import android.util.Log
 import android.widget.Toast
 
 /**
- * The launcher entry. Two jobs, no UI of its own:
+ * The launcher entry, and also what the head unit's boot-item list calls -- those lists
+ * launch the launcher activity. Two jobs, no UI of its own:
  *
- *  1. Make sure the watcher is running (this is also what the head unit's boot-item
- *     list ends up calling, since those lists launch the launcher activity).
- *  2. Open the system Wi-Fi settings screen, because that is what a person tapping
- *     the icon wants.
+ *  1. Make sure the watcher is running.
+ *  2. Open the system Wi-Fi settings screen.
  *
- * Note the asymmetry with the boot path: [BootReceiver] never opens settings. Throwing
- * the Wi-Fi page over the radio's UI at every startup is the opposite of staying out of
- * the way.
+ * At boot that leaves the Wi-Fi page sitting on screen, which is fine: it is the
+ * "initial screen", and [WifiWatchService] presses HOME off it the moment the
+ * connection lands. When a person taps the icon instead, nothing presses HOME and the
+ * page stays put, which is what they wanted.
+ *
+ * First run only, it walks one-time grants that keep the ROM from reaping the service.
  */
 class MainActivity : Activity() {
 
-    /** Set while the battery-optimisation dialog is up, so we know to wait for it. */
-    private var awaitingWhitelist = false
+    private val prompts = ArrayDeque<Intent>()
     private var resumes = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -36,43 +37,55 @@ class MainActivity : Activity() {
         WifiWatchService.start(this)
         Watchdog.arm(this)
 
-        if (!alreadyHandledWhitelist()) {
-            // One time only: get out of the battery optimiser so the ROM has one less
-            // excuse to reap us.
-            prefs().edit().putBoolean(KEY_ASKED, true).apply()
-            awaitingWhitelist = start(
+        queueOneTimeGrants()
+        step()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (isFinishing) return
+        // The first resume is our own, before a prompt covers the screen; every one
+        // after that is a prompt handing control back.
+        if (resumes++ == 0) return
+        step()
+    }
+
+    /** Fire the next outstanding grant prompt, or fall through to Wi-Fi settings. */
+    private fun step() {
+        while (prompts.isNotEmpty()) {
+            if (start(prompts.removeFirst())) return
+        }
+        openWifiSettings()
+        finish()
+    }
+
+    // --- one-time grants -----------------------------------------------------------
+
+    private fun prefs() = getSharedPreferences("wifisettings", Context.MODE_PRIVATE)
+
+    private fun queueOneTimeGrants() {
+        val prefs = prefs()
+
+        // Out of the battery optimiser, so the ROM has one less excuse to reap us.
+        val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+        val exempt = pm?.isIgnoringBatteryOptimizations(packageName) ?: false
+        if (!exempt && !prefs.getBoolean(KEY_ASKED_BATTERY, false)) {
+            prefs.edit().putBoolean(KEY_ASKED_BATTERY, true).apply()
+            prompts.add(
                 Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
                     .setData(Uri.parse("package:$packageName"))
             )
         }
 
-        if (!awaitingWhitelist) {
-            openWifiSettings()
-            finish()
+        // Only on Android 10/11, and only because it is the exemption that lets the
+        // service press HOME from the background. Never asked for on 8.0 or 9.
+        if (Home.needsOverlayGrant(this) && !prefs.getBoolean(KEY_ASKED_OVERLAY, false)) {
+            prefs.edit().putBoolean(KEY_ASKED_OVERLAY, true).apply()
+            prompts.add(
+                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+                    .setData(Uri.parse("package:$packageName"))
+            )
         }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        if (!awaitingWhitelist) return
-        // First resume is us, before the dialog covers the screen; the second is the
-        // dialog handing control back.
-        if (++resumes >= 2) {
-            awaitingWhitelist = false
-            openWifiSettings()
-            finish()
-        }
-    }
-
-    // --- battery optimisation whitelist -------------------------------------------
-
-    private fun prefs() = getSharedPreferences("wifisettings", Context.MODE_PRIVATE)
-
-    /** True if we are already exempt, or we have asked once and been told no. */
-    private fun alreadyHandledWhitelist(): Boolean {
-        val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
-        if (pm != null && pm.isIgnoringBatteryOptimizations(packageName)) return true
-        return prefs().getBoolean(KEY_ASKED, false)
     }
 
     // --- settings ------------------------------------------------------------------
@@ -106,6 +119,7 @@ class MainActivity : Activity() {
 
     private companion object {
         const val TAG = "WifiSettings"
-        const val KEY_ASKED = "asked_battery_whitelist"
+        const val KEY_ASKED_BATTERY = "asked_battery_whitelist"
+        const val KEY_ASKED_OVERLAY = "asked_overlay"
     }
 }

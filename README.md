@@ -46,6 +46,29 @@ a head unit, so a scan-based approach would silently return an empty list foreve
 If nothing is in range, the radio is deliberately left **on** so the framework keeps
 retrying on its own as you drive back into coverage.
 
+## The HOME handoff
+
+When the first connection lands, the service presses HOME so ZLauncher comes forward and
+wires the tun up. That also clears the Wi-Fi settings page the boot item left on screen —
+the "initial screen" has its connection, so it gets out of the way.
+
+Not an injected keypress: `KEYCODE_HOME` needs `INJECT_EVENTS` (signature-level) and
+`input keyevent 3` needs root. Launching `CATEGORY_HOME` does the same job with no
+permission.
+
+**Android 10/11 caveat.** Background activity starts are blocked there, and — contrary to
+a widespread belief — running a foreground service is *not* on the exemption list.
+`SYSTEM_ALERT_WINDOW` is, so on those two versions the app asks once for "draw over other
+apps". It draws nothing; the permission is only there to make the HOME start land. On 8.0
+and 9 it is never requested and never needed.
+
+It fires **once**, and only on a transition it actually watched happen:
+
+- `sawOffline` — if the service starts while the unit is already online (a watchdog poke
+  an hour into a drive), there was no handoff to make, and pressing HOME would just yank
+  the driver out of whatever they were using.
+- `homeSent` — a mid-drive reconnect is not an "initial screen", so it does not re-fire.
+
 ## Staying alive
 
 These ROMs ship "one-key clean" process killers, so the foreground service alone is not
@@ -70,8 +93,10 @@ Opens the system Wi-Fi settings page (with fallbacks to the
 `com.android.settings/.wifi.WifiSettings` component, then the top-level settings list)
 and makes sure the service is running.
 
-The boot path deliberately does **not** open settings — throwing the Wi-Fi page over the
-radio's UI at every startup is the opposite of staying out of the way.
+The head unit's boot-item list calls this same activity — those lists launch the launcher
+activity — so the Wi-Fi page does appear at boot. That is fine: the HOME handoff above
+clears it as soon as the connection lands. When a person taps the icon instead, nothing
+presses HOME and the page stays put.
 
 ## Build & install
 
@@ -88,5 +113,8 @@ and gets its leg clipped by the circle above ~80%), and an adaptive icon whose f
 ## Not verified
 
 Built and manifest-checked only. No device was attached, so nothing here has been run on
-hardware — in particular the reflection path in `isApActive()` and the softAP interface
-names are the two things most likely to need adjusting on your specific ROM.
+hardware. The three things most likely to need adjusting on a specific ROM:
+
+- the reflection path in `isApActive()`,
+- the softAP interface names it falls back to,
+- whether the ROM's launcher honours `CATEGORY_HOME` the way stock does.

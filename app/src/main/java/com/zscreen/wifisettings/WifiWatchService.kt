@@ -43,6 +43,12 @@ class WifiWatchService : Service() {
 
     private var lastNote: String? = null
 
+    /** Have we seen the unit offline yet this service lifetime? */
+    private var sawOffline = false
+
+    /** HOME is pressed once, on the first connection we watched come up. */
+    private var homeSent = false
+
     private val events = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             Log.d(TAG, "event ${intent.action}")
@@ -128,10 +134,26 @@ class WifiWatchService : Service() {
         if (NetState.isOnline(this)) {
             strikes = 0
             weEnabledWifi = false
+
+            // The boot-time handoff: the initial screen has its connection, so get off
+            // it and let ZLauncher come forward to wire the tun up.
+            //
+            // sawOffline gates this to a transition we actually watched happen. If the
+            // service starts while the unit is already online -- a watchdog poke an hour
+            // into a drive -- there was no handoff to make, and pressing HOME would just
+            // yank the driver out of whatever they were using. homeSent keeps it to the
+            // first connection only, for the same reason: a mid-drive reconnect is not
+            // an "initial screen".
+            if (sawOffline && !homeSent) {
+                homeSent = true
+                Home.go(this)
+            }
+
             update(getString(R.string.state_online, NetState.activeNetworkName(this)))
             schedule(IDLE_POLL_MS)
             return
         }
+        sawOffline = true
 
         // 3. Offline. Give a just-finished AP session a moment to release the chip.
         if (sinceAp < AP_COOLDOWN_MS) {
