@@ -49,6 +49,9 @@ class WifiWatchService : Service() {
     /** HOME is pressed once, on the first connection we watched come up. */
     private var homeSent = false
 
+    /** Consecutive passes where the Wi-Fi link checked out, before we hand off. */
+    private var confirmations = 0
+
     private val events = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             Log.d(TAG, "event ${intent.action}")
@@ -145,8 +148,21 @@ class WifiWatchService : Service() {
             // first connection only, for the same reason: a mid-drive reconnect is not
             // an "initial screen".
             if (sawOffline && !homeSent) {
-                homeSent = true
-                Home.go(this)
+                if (!NetState.isWifiConnected(this)) {
+                    // Online, but through the modem or a dongle rather than Wi-Fi.
+                    // Nothing was handed to us, so there is nothing to hand off.
+                    confirmations = 0
+                } else if (++confirmations < CONFIRMATIONS) {
+                    // Make sure the link is really up before leaving: NetworkInfo can
+                    // read connected while DHCP is still settling, and a link that only
+                    // held for one pass is not worth handing the screen over for.
+                    update(getString(R.string.state_verifying))
+                    schedule(CONFIRM_MS)
+                    return
+                } else {
+                    homeSent = true
+                    Home.go(this)
+                }
             }
 
             update(getString(R.string.state_online, NetState.activeNetworkName(this)))
@@ -246,6 +262,10 @@ class WifiWatchService : Service() {
         private const val IDLE_POLL_MS = 20_000L
         private const val AP_POLL_MS = 15_000L
         private const val AP_COOLDOWN_MS = 15_000L
+
+        /** Passes the Wi-Fi link must hold before we press HOME, and the gap between. */
+        private const val CONFIRMATIONS = 2
+        private const val CONFIRM_MS = 4_000L
 
         fun start(context: Context) {
             val intent = Intent(context, WifiWatchService::class.java)

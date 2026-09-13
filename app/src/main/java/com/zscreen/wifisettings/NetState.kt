@@ -2,6 +2,7 @@ package com.zscreen.wifisettings
 
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.wifi.SupplicantState
 import android.net.wifi.WifiManager
 import android.util.Log
 import java.net.NetworkInterface
@@ -75,6 +76,32 @@ object NetState {
     } catch (e: Exception) {
         Log.w(TAG, "Could not enumerate interfaces", e)
         false
+    }
+
+    /**
+     * A genuinely usable Wi-Fi link, not just "the framework says connected".
+     *
+     * [isOnline] is too loose to hand off on: it also goes true for the built-in modem
+     * or a USB dongle, and NetworkInfo can read connected while DHCP is still in flight.
+     * So this checks the three things that actually have to be true -- the supplicant
+     * has completed association, we are on a real saved network, and we hold an IP.
+     *
+     * Deliberately does not look at the SSID: on 8.0 `WifiInfo.getSSID()` returns
+     * "<unknown ssid>" without location permission, which we do not ask for.
+     */
+    @Suppress("DEPRECATION")
+    fun isWifiConnected(context: Context): Boolean {
+        val cm = context.applicationContext
+            .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+        val net = cm.getNetworkInfo(ConnectivityManager.TYPE_WIFI)
+        if (net == null || !net.isConnected) return false
+
+        val info = wifiManager(context)?.connectionInfo ?: return false
+        val associated = info.supplicantState == SupplicantState.COMPLETED
+        val onNetwork = info.networkId != -1
+        val hasIp = info.ipAddress != 0
+        Log.d(TAG, "wifi link: associated=$associated network=$onNetwork ip=$hasIp")
+        return associated && onNetwork && hasIp
     }
 
     fun wifiManager(context: Context): WifiManager? =

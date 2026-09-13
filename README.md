@@ -62,6 +62,17 @@ a widespread belief — running a foreground service is *not* on the exemption l
 apps". It draws nothing; the permission is only there to make the HOME start land. On 8.0
 and 9 it is never requested and never needed.
 
+Before it leaves, the link has to actually check out. `isOnline()` is too loose to hand
+off on — it also goes true for the built-in modem or a USB dongle, and `NetworkInfo` can
+read connected while DHCP is still in flight. So `NetState.isWifiConnected()` requires all
+three of: supplicant state `COMPLETED`, a real saved `networkId`, and a non-zero IP. That
+has to hold for two passes 4s apart, because a link that survives one poll is not worth
+handing the screen over for. (It deliberately ignores the SSID — on 8.0 `getSSID()`
+returns `<unknown ssid>` without location permission, which this app never asks for.)
+
+If the unit is online through the modem rather than Wi-Fi, nothing is handed off, because
+nothing was handed to us.
+
 It fires **once**, and only on a transition it actually watched happen:
 
 - `sawOffline` — if the service starts while the unit is already online (a watchdog poke
