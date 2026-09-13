@@ -30,9 +30,25 @@ else gets a DHCP lease in the same `/24`.
 
 | Where | Port | What | Verified |
 |---|---|---|---|
-| phone `.1` | TCP 8000 | PdaNet HTTP proxy — the uplink for every other peer | **open, live** |
+| phone `.1` | TCP 8000 | PdaNet — serves the PAC file *and* is the proxy itself | **confirmed live** |
 | phone `.1` | UDP 8002 | receives `ZREMOTE_HELLO` from the head unit every 3s | by design |
 | head unit | TCP 8001 | **remote control** — ZRemote-Receiver takes input commands here | not listening when probed |
+
+### :8000 does both jobs
+
+It answers a plain `GET /` with `Content-Type: application/x-ns-proxy-autoconfig` and
+this body:
+
+```javascript
+function FindProxyForURL(url, host){
+  if (host=='192.168.49.1') return 'DIRECT';
+  else return "PROXY 192.168.49.1:8000; DIRECT";
+}
+```
+
+So the auto-config server and the proxy it points at are the same port — there is no
+second port to find. Traffic aimed at the gateway itself goes `DIRECT`, everything else
+is proxied.
 
 `:8000` is load-bearing for every device on the subnet. Nothing should ever disturb it.
 
@@ -59,6 +75,13 @@ know before building on it:
    proxy) or sweep the `/24` itself.
 2. **Leases move.** Only `.1` is stable. Anything that caches a peer's address needs to
    re-resolve it rather than assume it survives a reconnect.
+
+### Not a peer port: 8080
+
+ZLauncher's `KeepAliveService.PROXY_PORT = 8080` is a loopback-only server, bound
+explicitly to the IPv4 literal `127.0.0.1` on the head unit. It never appears on the
+subnet and is not something another peer can reach. Easy to mistake for a network port
+when reading that source.
 
 ## What this means for this app
 
