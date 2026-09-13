@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Wi-Fi Keep Online</string>
+    <string name="channel_name">Connection watcher</string>
+
+    <string name="state_starting">Starting…</string>
+    <string name="state_online">Connected (%1$s)</string>
+    <string name="state_connecting">Wi-Fi on, connecting…</string>
+    <string name="state_waiting">No network in range</string>
+    <string name="state_carplay">Hotspot in use — standing by</string>
+    <string name="state_blocked">Cannot switch Wi-Fi on</string>
+
+    <string name="no_settings_app">No settings app found on this device</string>
+</resources>
