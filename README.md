@@ -70,6 +70,13 @@ has to hold for two passes 4s apart, because a link that survives one poll is no
 handing the screen over for. (It deliberately ignores the SSID — on 8.0 `getSSID()`
 returns `<unknown ssid>` without location permission, which this app never asks for.)
 
+On top of that it prefers the framework's own internet verdict — `NET_CAPABILITY_VALIDATED`,
+which the system stamps after probing on connect, free to read and costing no traffic of
+ours. But it is a preference with a 20s grace, never a requirement: a phone hotspot with
+no cell data, or one the probe cannot reach, reads unvalidated while still being a
+perfectly good link for the tun to sit on. Hard-gating on it would strand the handoff in
+exactly the field case this app exists for.
+
 If the unit is online through the modem rather than Wi-Fi, nothing is handed off, because
 nothing was handed to us.
 

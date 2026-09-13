@@ -2,6 +2,7 @@ package com.zscreen.wifisettings
 
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.wifi.SupplicantState
 import android.net.wifi.WifiManager
 import android.util.Log
@@ -102,6 +103,32 @@ object NetState {
         val hasIp = info.ipAddress != 0
         Log.d(TAG, "wifi link: associated=$associated network=$onNetwork ip=$hasIp")
         return associated && onNetwork && hasIp
+    }
+
+    /**
+     * The framework's own verdict on whether the Wi-Fi network actually reaches the
+     * internet -- it probes on connect and stamps NET_CAPABILITY_VALIDATED. Free to
+     * read; no traffic of our own.
+     *
+     * Treated as a preference, never a requirement. A phone hotspot with no cell data,
+     * or one the probe cannot reach, reads unvalidated while still being a perfectly
+     * good link for the tun to sit on. Gating the handoff on this would strand us in
+     * exactly the field case this app exists for.
+     */
+    fun isWifiValidated(context: Context): Boolean {
+        val cm = context.applicationContext
+            .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+        return try {
+            cm.allNetworks.any { net ->
+                val caps = cm.getNetworkCapabilities(net)
+                caps != null &&
+                        caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+                        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not read network capabilities", e)
+            false
+        }
     }
 
     fun wifiManager(context: Context): WifiManager? =

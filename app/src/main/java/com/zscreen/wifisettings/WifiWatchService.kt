@@ -52,6 +52,9 @@ class WifiWatchService : Service() {
     /** Consecutive passes where the Wi-Fi link checked out, before we hand off. */
     private var confirmations = 0
 
+    /** When the link first looked good, so we can stop waiting on the internet probe. */
+    private var goodLinkAt = 0L
+
     private val events = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             Log.d(TAG, "event ${intent.action}")
@@ -152,16 +155,30 @@ class WifiWatchService : Service() {
                     // Online, but through the modem or a dongle rather than Wi-Fi.
                     // Nothing was handed to us, so there is nothing to hand off.
                     confirmations = 0
-                } else if (++confirmations < CONFIRMATIONS) {
-                    // Make sure the link is really up before leaving: NetworkInfo can
-                    // read connected while DHCP is still settling, and a link that only
-                    // held for one pass is not worth handing the screen over for.
-                    update(getString(R.string.state_verifying))
-                    schedule(CONFIRM_MS)
-                    return
+                    goodLinkAt = 0L
                 } else {
-                    homeSent = true
-                    Home.go(this)
+                    if (goodLinkAt == 0L) goodLinkAt = now
+                    confirmations++
+
+                    // Leave only on a link we have actually verified: associated, on a
+                    // saved network, holding an IP, and still there a few seconds later.
+                    // NetworkInfo can read connected while DHCP is still settling, and a
+                    // link that survives one poll is not worth giving up the screen for.
+                    val held = confirmations >= CONFIRMATIONS
+                    // Prefer the framework's internet probe, but never wait on it
+                    // forever -- a hotspot it cannot validate is still a fine link.
+                    val probed = NetState.isWifiValidated(this) ||
+                            now - goodLinkAt >= VALIDATE_GRACE_MS
+
+                    if (held && probed) {
+                        Log.i(TAG, "link verified (validated=${NetState.isWifiValidated(this)})")
+                        homeSent = true
+                        Home.go(this)
+                    } else {
+                        update(getString(R.string.state_verifying))
+                        schedule(CONFIRM_MS)
+                        return
+                    }
                 }
             }
 
@@ -266,6 +283,8 @@ class WifiWatchService : Service() {
         /** Passes the Wi-Fi link must hold before we press HOME, and the gap between. */
         private const val CONFIRMATIONS = 2
         private const val CONFIRM_MS = 4_000L
+        /** How long to wait on NET_CAPABILITY_VALIDATED before handing off without it. */
+        private const val VALIDATE_GRACE_MS = 20_000L
 
         fun start(context: Context) {
             val intent = Intent(context, WifiWatchService::class.java)
