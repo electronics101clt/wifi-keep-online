@@ -11,6 +11,19 @@
          lets the service start the HOME activity from the background. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
+    <!-- Declared so the unit's own boot-item picker will list this app.
+         com.jancar.settings/.ui.activity.SelfStartSelectorActivity builds its list from
+         MAIN/LAUNCHER activities and then drops every non-system app that does not
+         request WRITE_EXTERNAL_STORAGE or ACCESS_FINE_LOCATION – its
+         HOME_WINDOW_PERMISSION array. Without one of those the app is filtered out
+         before the list is drawn, and cannot be set as a startup app at all.
+
+         Declared only. It is never requested at runtime, so no prompt appears and the
+         app holds no location access; nothing in the code reads it. Of the two,
+         ACCESS_FINE_LOCATION is at least the one Wi-Fi work legitimately needs – it is
+         what gates getScanResults() and the real SSID from 8.0 onward. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
