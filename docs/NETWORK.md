@@ -4,35 +4,38 @@ Notes on the network this app runs on, gathered by probing a live setup. Relevan
 because the unit's uplink is a phone hotspot, not real Wi-Fi, and because peers on that
 hotspot can reach each other — which makes relaying state between them possible.
 
+The setup probed here is **PdaNet+ itself**, the real app, running on the phone. No
+ZConnect+/ZRemote software was involved; see the last section for why that matters.
+
 Addresses below are the fixed PdaNet ones. Per-device DHCP leases are written `.x`,
 since they change every session and identify nothing useful.
 
 ## Topology
 
 ```
-   phone (PdaNet+ / Wi-Fi Direct group owner)
+   phone — PdaNet+ (Wi-Fi Direct group owner)
    192.168.49.1
-        |  :8000  HTTP proxy — this is the internet for everyone else
-        |  :8001  sends remote-control commands out to the head unit
-        |  UDP :8002  receives ZREMOTE_HELLO announcements
+        |  :8000  PAC file + HTTP proxy — the internet for everyone else
         |
    ~~~~ 192.168.49.0/24 ~~~~  AP isolation OFF — peers reach each other
         |                     |                      |
-   head unit .x          Linux PC .x            other peers .x
-   :8001 remote control  (several similar machines)
+    peer .x               peer .x                peer .x
 ```
 
 The group owner address is fixed at `192.168.49.1` by Wi-Fi Direct, which is why
 `NetState.PDANET_GATEWAY` can be a constant rather than something to discover. Everyone
 else gets a DHCP lease in the same `/24`.
 
-## Ports
+## What is actually listening
 
-| Where | Port | What | Verified |
+Exactly one thing, on the phone:
+
+| Where | Port | What | Status |
 |---|---|---|---|
-| phone `.1` | TCP 8000 | PdaNet — serves the PAC file *and* is the proxy itself | **confirmed live** |
-| phone `.1` | UDP 8002 | receives `ZREMOTE_HELLO` from the head unit every 3s | by design |
-| head unit | TCP 8001 | **remote control** — ZRemote-Receiver takes input commands here | not listening when probed |
+| phone `.1` | TCP 8000 | PdaNet+ — serves the PAC file *and* is the proxy itself | **confirmed live** |
+
+Every other port probed on every host was closed. That is the whole network: a gateway
+offering a proxy, and peers using it.
 
 ### :8000 does both jobs
 
@@ -52,36 +55,22 @@ is proxied.
 
 `:8000` is load-bearing for every device on the subnet. Nothing should ever disturb it.
 
-The remote control runs host → client: the phone sends on `:8001` and the head unit
-listens on `:8001`, injecting the input through its accessibility service. That direction
-is why discovery matters at all — the host is the group owner and cannot know the
-client's DHCP lease, so the client has to announce itself first or every command is
-dropped with "No client IP set".
-
 ## Cross-talk
 
 **Peers can reach each other directly.** ICMP between two non-gateway hosts on the
-subnet succeeds, so the hotspot does not do client isolation. Latency is uneven —
-observed 48–393 ms round trip between two peers — so anything built on this wants
-generous timeouts, not LAN-grade assumptions.
+subnet succeeds, so PdaNet+ does not do client isolation. Latency is uneven — observed
+48–393 ms round trip between two peers — so anything built on this wants generous
+timeouts, not LAN-grade assumptions.
 
 That makes peer-to-peer relaying viable without going through the phone. Two things to
 know before building on it:
 
-1. **Discovery is unicast, not broadcast.** `ZREMOTE_HELLO` goes to `192.168.49.1`
-   specifically, so a peer cannot find other peers by passively listening — nothing is
-   ever addressed to the subnet at large. A peer wanting to know who else is here has to
-   either ask the host (which sees everyone, both from the hellos and from the `:8000`
-   proxy) or sweep the `/24` itself.
+1. **Nothing announces itself.** With PdaNet+ alone there is no discovery protocol on
+   this network at all — no broadcast, no beacon, nothing addressed to the subnet at
+   large. A peer wanting to know who else is here has to sweep the `/24` itself, or be
+   told out of band.
 2. **Leases move.** Only `.1` is stable. Anything that caches a peer's address needs to
    re-resolve it rather than assume it survives a reconnect.
-
-### Not a peer port: 8080
-
-ZLauncher's `KeepAliveService.PROXY_PORT = 8080` is a loopback-only server, bound
-explicitly to the IPv4 literal `127.0.0.1` on the head unit. It never appears on the
-subnet and is not something another peer can reach. Easy to mistake for a network port
-when reading that source.
 
 ## What this means for this app
 
@@ -91,11 +80,24 @@ See the handoff section in the main README.
 
 The cross-talk finding is recorded here because it is the groundwork for a peer relay —
 a unit that knows it is online could tell the others, rather than each one discovering
-the state independently. Nothing in this app does that yet.
+the state independently. Nothing in this app does that yet, and with PdaNet+ alone there
+is no existing protocol to hook into.
+
+## What is *not* on this network
+
+The ZConnect+ Remote / ZRemote-Receiver pair is a **separate project** and was not
+running. Its ports (`:8001` for remote-control commands host → client, UDP `:8002` for
+the client's `ZREMOTE_HELLO` announcements) belong to that design, not to PdaNet+.
+Probing found both closed, which is the expected result when those apps are not
+installed or not started — not evidence of anything being broken.
+
+Worth keeping straight when reading ZLauncher's source too: its
+`KeepAliveService.PROXY_PORT = 8080` is a loopback-only server, bound explicitly to the
+IPv4 literal `127.0.0.1` on the head unit. It never appears on the subnet and no peer
+can reach it.
 
 ## Not verified
 
-- The head unit had no TCP port open when probed, so ZRemote-Receiver was not running at
-  the time. The `:8001` row above is from its design, not from observation.
-- No UDP 8002 traffic was observable from a third peer, which is consistent with the
-  hellos being unicast to the host, but is not positive proof they were being sent.
+- A second host was present on the subnet during probing, but with nothing listening it
+  could only be identified by its MAC vendor prefix (a MediaTek Wi-Fi part, consistent
+  with the head unit). Not confirmed.
