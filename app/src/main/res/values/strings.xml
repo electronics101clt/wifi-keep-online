@@ -5,6 +5,7 @@
 
     <string name="state_starting">Starting…</string>
     <string name="state_online">Connected (%1$s)</string>
+    <string name="state_online_pdanet">Connected to PdaNet</string>
     <string name="state_connecting">Wi-Fi on, connecting…</string>
     <string name="state_verifying">Checking connection…</string>
     <string name="state_waiting">No network in range</string>
@@ -13,5 +14,4 @@
 
     <string name="toast_connected">Wi-Fi already connected</string>
     <string name="toast_hotspot">Hotspot in use — leaving Wi-Fi alone</string>
-    <string name="no_settings_app">No settings app found on this device</string>
 </resources>

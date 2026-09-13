@@ -121,30 +121,50 @@ object NetState {
     }
 
     /**
-     * The framework's own verdict on whether the Wi-Fi network actually reaches the
-     * internet -- it probes on connect and stamps NET_CAPABILITY_VALIDATED. Free to
-     * read; no traffic of our own.
+     * The default-route gateway on the Wi-Fi network, or null.
      *
-     * Treated as a preference, never a requirement. A phone hotspot with no cell data,
-     * or one the probe cannot reach, reads unvalidated while still being a perfectly
-     * good link for the tun to sit on. Gating the handoff on this would strand us in
-     * exactly the field case this app exists for.
+     * This is the signal, not NET_CAPABILITY_VALIDATED. ZLauncher strips INTERNET and
+     * VALIDATED from its own NetworkRequest precisely because "Android's own
+     * INTERNET/VALIDATED opinion is exactly what's unreliable against this network" --
+     * a PdaNet hotspot routinely reads unvalidated while working perfectly. Waiting on
+     * the framework's probe would just add a timeout to every handoff.
+     *
+     * Costs no permission beyond ACCESS_WIFI_STATE, which we already hold. In
+     * particular it needs no location grant, unlike reading the SSID.
      */
-    fun isWifiValidated(context: Context): Boolean {
+    fun wifiGateway(context: Context): String? {
         val cm = context.applicationContext
-            .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+            .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return null
         return try {
-            cm.allNetworks.any { net ->
-                val caps = cm.getNetworkCapabilities(net)
-                caps != null &&
-                        caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
-                        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-            }
+            cm.allNetworks.asSequence()
+                .filter { net ->
+                    cm.getNetworkCapabilities(net)
+                        ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+                }
+                .mapNotNull { net ->
+                    cm.getLinkProperties(net)?.routes
+                        ?.firstOrNull { it.isDefaultRoute }?.gateway?.hostAddress
+                }
+                .firstOrNull()
         } catch (e: Exception) {
-            Log.w(TAG, "Could not read network capabilities", e)
-            false
+            Log.w(TAG, "Could not read link properties", e)
+            null
         }
     }
+
+    /**
+     * Is this the network ZLauncher will actually raise a tunnel on? Same gateway its
+     * checkPdaNetGateway() tests before calling Tun2HttpVpnService.start(), so a true
+     * here means the handoff lands on a launcher that has work to do.
+     */
+    fun isPdaNetLink(context: Context): Boolean {
+        val gw = wifiGateway(context)
+        Log.d(TAG, "wifi gateway: $gw")
+        return gw == PDANET_GATEWAY
+    }
+
+    /** PdaNet's fixed hotspot gateway, matching ZLauncher's KeepAliveService. */
+    const val PDANET_GATEWAY = "192.168.49.1"
 
     fun wifiManager(context: Context): WifiManager? =
         context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager

@@ -12,25 +12,39 @@ Register it in the radio's own **boot item / autostart** list.
              boot item launches the app
                         |
          +--------------+--------------+
-         |  hotspot up?  -> yes: dismiss, stay off the screen
-         |  wifi already connected? -> yes: dismiss
+         |  hotspot up?   -> yes: touch nothing, get off the screen
+         |  wifi already connected? -> yes: dismiss, go to home screen
          +--------------+--------------+
                         | no to both
-                   ENTER DIALOG
-              (system Wi-Fi settings page)
+            service switches the radio on
+        framework joins a saved profile if visible
                         |
-              service kicks the radio on
-              framework auto-joins a saved network
+            +-----------+-----------+
+            | joined                | nothing in range after 30s,
+            |                       | or setWifiEnabled() refused (10/11)
+            |                       |
+      verify the link:         OPEN THE MENU (once)
+   associated + saved networkId       |
+   + has IP + still there 4s          | user picks a network
+            |                         |
+            +-----------+-------------+
                         |
-                 verify the link:
-        associated + saved networkId + has IP
-        + still there 4s later + validated (20s grace)
-                        |
-                    LEAVE
-          handoff -> ZLauncher (app.lawnchair)
+                  handoff -> ZLauncher (app.lawnchair)
                         |
         ZLauncher's KeepAliveService wires the tunnel
 ```
+
+The menu is a **fallback, not the entry point**. The automatic path gets tried first,
+because on 8.0 and 9 it usually just works: enable the radio and the framework joins a
+saved profile on its own.
+
+### Android 10 and 11
+
+There the menu is not a fallback, it is the only path. `setWifiEnabled()` is a no-op for
+third-party apps from API 29, so the app cannot switch the radio on at all and instead
+puts the toggle in front of the user. API 29 added a slide-up Wi-Fi panel for exactly
+this, which is much less intrusive than the full settings page, so it is preferred where
+it exists.
 
 ## The one rule that overrides everything
 
@@ -110,12 +124,17 @@ has to hold for two passes 4s apart, because a link that survives one poll is no
 handing the screen over for. (It deliberately ignores the SSID — on 8.0 `getSSID()`
 returns `<unknown ssid>` without location permission, which this app never asks for.)
 
-On top of that it prefers the framework's own internet verdict — `NET_CAPABILITY_VALIDATED`,
-which the system stamps after probing on connect, free to read and costing no traffic of
-ours. But it is a preference with a 20s grace, never a requirement: a phone hotspot with
-no cell data, or one the probe cannot reach, reads unvalidated while still being a
-perfectly good link for the tun to sit on. Hard-gating on it would strand the handoff in
-exactly the field case this app exists for.
+It deliberately does **not** consult `NET_CAPABILITY_VALIDATED`. ZLauncher strips
+`INTERNET` and `VALIDATED` out of its own `NetworkRequest` precisely because "Android's
+own INTERNET/VALIDATED opinion is exactly what's unreliable against this network" — a
+PdaNet hotspot routinely reads unvalidated while working perfectly. Waiting on that probe
+would put a timeout in front of every handoff.
+
+The honest signal is the **default-route gateway**. `NetState.isPdaNetLink()` checks it
+against `192.168.49.1`, the same value ZLauncher's `checkPdaNetGateway()` tests before
+calling `Tun2HttpVpnService.start()`. So a match means the handoff is landing on a
+launcher that has work to do — and it costs no permission beyond `ACCESS_WIFI_STATE`,
+unlike reading the SSID.
 
 If the unit is online through the modem rather than Wi-Fi, nothing is handed off, because
 nothing was handed to us.
@@ -171,10 +190,15 @@ only watches the SSID and builds or destroys the tunnel off it.
 This app is the other half: it does the radio writes ZLauncher won't, and stops at the
 point ZLauncher takes over. Neither one touches the other's job.
 
-One consequence worth knowing: ZLauncher builds a tunnel only when the connected SSID
-contains "pdanet". If this app gets the unit onto some other network, the handoff still
-happens and ZLauncher still comes forward — it just won't raise a tunnel, which is correct
-behaviour, not a failure.
+ZLauncher raises a tunnel on two signals: an SSID containing "pdanet" (which needs the
+location permission it requests itself), and the `192.168.49.1` default-route gateway.
+This app checks the gateway one, since it needs no location grant, and reports it in the
+notification — "Connected to PdaNet" against a plain "Connected". So you can tell at a
+glance whether the link is merely real or is the one ZLauncher will tunnel.
+
+If this app gets the unit onto some other network, the handoff still happens and ZLauncher
+still comes forward — it just won't raise a tunnel, which is correct behaviour, not a
+failure.
 
 ## Build & install
 

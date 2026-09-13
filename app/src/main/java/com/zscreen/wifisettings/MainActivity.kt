@@ -2,7 +2,6 @@ package com.zscreen.wifisettings
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -15,16 +14,15 @@ import android.widget.Toast
 
 /**
  * The launcher entry, and also what the head unit's boot-item list calls -- those lists
- * launch the launcher activity. No UI of its own.
+ * launch the launcher activity. No UI of its own, and it never opens the Wi-Fi menu
+ * itself. Three outcomes:
  *
- * It starts the watcher, then enters the Wi-Fi dialog only when there is something to
- * fix: **no Wi-Fi connected and no hotspot up**. A hotspot means wireless CarPlay has
- * the chip and we stay off the screen entirely; an existing connection means there is
- * nothing to do. Either way it falls silent with a toast rather than taking the display.
- *
- * When it does enter, the dialog is the "initial screen", and [WifiWatchService] hands
- * off out of it -- to ZLauncher, which finishes the job by wiring the tunnel -- as soon
- * as the connection verifies.
+ *  - **Hotspot up** -- wireless CarPlay has the chip. Get off the screen, touch nothing.
+ *  - **Already connected** -- nothing to fix, so dismiss and continue: close up and go
+ *    to the home screen, putting ZLauncher in front to get on with the tunnel.
+ *  - **Neither** -- hand over to [WifiWatchService], which switches the radio on and
+ *    lets the framework join a saved profile if one is visible. Only if that automatic
+ *    path runs out of things to try does the service put the menu up.
  *
  * First run only, it walks one-time grants that keep the ROM from reaping the service.
  */
@@ -39,18 +37,24 @@ class MainActivity : Activity() {
         WifiWatchService.start(this)
         Watchdog.arm(this)
 
-        // Enter only when there is something to fix. CarPlay first, as everywhere else
-        // in this app: while the hotspot is up getWifiState() reports DISABLED, so
-        // checking Wi-Fi first would read the situation exactly backwards.
+        // CarPlay first, as everywhere else in this app: while the hotspot is up
+        // getWifiState() reports DISABLED, so checking Wi-Fi first would read the
+        // situation exactly backwards. Nothing to do and nothing to hand off.
         if (NetState.isApActive(this)) {
-            dismiss(R.string.toast_hotspot)
-            return
-        }
-        if (NetState.isWifiConnected(this)) {
-            dismiss(R.string.toast_connected)
+            dismiss(R.string.toast_hotspot, home = false)
             return
         }
 
+        // Already connected: dismiss and continue -- close up and go to the home
+        // screen, so ZLauncher is in front and can get on with the tunnel.
+        if (NetState.isWifiConnected(this)) {
+            dismiss(R.string.toast_connected, home = true)
+            return
+        }
+
+        // Otherwise the service takes it from here: switch the radio on and let the
+        // framework join a saved profile if one is visible. The menu is not opened
+        // here -- it only goes up if that automatic path runs out of things to try.
         queueOneTimeGrants()
         step()
     }
@@ -67,10 +71,11 @@ class MainActivity : Activity() {
      * stray toast or one missing one, which is a fair price for not guessing on
      * anything that matters.
      */
-    private fun dismiss(resId: Int) {
+    private fun dismiss(resId: Int, home: Boolean) {
         if (SystemClock.elapsedRealtime() > BOOT_WINDOW_MS) {
             Toast.makeText(applicationContext, resId, Toast.LENGTH_SHORT).show()
         }
+        if (home) Home.go(this)
         finish()
     }
 
@@ -83,12 +88,11 @@ class MainActivity : Activity() {
         step()
     }
 
-    /** Fire the next outstanding grant prompt, or fall through to Wi-Fi settings. */
+    /** Fire the next outstanding grant prompt, then get out of the way. */
     private fun step() {
         while (prompts.isNotEmpty()) {
             if (start(prompts.removeFirst())) return
         }
-        openWifiSettings()
         finish()
     }
 
@@ -111,7 +115,9 @@ class MainActivity : Activity() {
         }
 
         // Only on Android 10/11, and only because it is the exemption that lets the
-        // service press HOME from the background. Never asked for on 8.0 or 9.
+        // service start activities from the background -- both the handoff home and the
+        // Wi-Fi menu, which on those versions is the only way the radio gets switched
+        // on at all. Never asked for on 8.0 or 9.
         if (Home.needsOverlayGrant(this) && !prefs.getBoolean(KEY_ASKED_OVERLAY, false)) {
             prefs.edit().putBoolean(KEY_ASKED_OVERLAY, true).apply()
             prompts.add(
@@ -119,24 +125,6 @@ class MainActivity : Activity() {
                     .setData(Uri.parse("package:$packageName"))
             )
         }
-    }
-
-    // --- settings ------------------------------------------------------------------
-
-    private fun openWifiSettings() {
-        // 1. The documented, public way. Works on stock Android 8.0, no permission needed.
-        if (start(Intent(Settings.ACTION_WIFI_SETTINGS))) return
-
-        // 2. Some OEM/head-unit ROMs strip the alias above but keep the activity itself.
-        val direct = Intent(Intent.ACTION_MAIN).setComponent(
-            ComponentName("com.android.settings", "com.android.settings.wifi.WifiSettings")
-        )
-        if (start(direct)) return
-
-        // 3. Last resort: drop the user in the top-level settings list.
-        if (start(Intent(Settings.ACTION_SETTINGS))) return
-
-        Toast.makeText(this, R.string.no_settings_app, Toast.LENGTH_LONG).show()
     }
 
     private fun start(intent: Intent): Boolean = try {

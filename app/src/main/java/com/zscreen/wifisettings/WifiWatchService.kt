@@ -52,8 +52,8 @@ class WifiWatchService : Service() {
     /** Consecutive passes where the Wi-Fi link checked out, before we hand off. */
     private var confirmations = 0
 
-    /** When the link first looked good, so we can stop waiting on the internet probe. */
-    private var goodLinkAt = 0L
+    /** The menu is put up at most once per service lifetime. */
+    private var menuShown = false
 
     private val events = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -155,34 +155,31 @@ class WifiWatchService : Service() {
                     // Online, but through the modem or a dongle rather than Wi-Fi.
                     // Nothing was handed to us, so there is nothing to hand off.
                     confirmations = 0
-                    goodLinkAt = 0L
-                } else {
-                    if (goodLinkAt == 0L) goodLinkAt = now
-                    confirmations++
-
+                } else if (++confirmations < CONFIRMATIONS) {
                     // Leave only on a link we have actually verified: associated, on a
                     // saved network, holding an IP, and still there a few seconds later.
                     // NetworkInfo can read connected while DHCP is still settling, and a
                     // link that survives one poll is not worth giving up the screen for.
-                    val held = confirmations >= CONFIRMATIONS
-                    // Prefer the framework's internet probe, but never wait on it
-                    // forever -- a hotspot it cannot validate is still a fine link.
-                    val probed = NetState.isWifiValidated(this) ||
-                            now - goodLinkAt >= VALIDATE_GRACE_MS
-
-                    if (held && probed) {
-                        Log.i(TAG, "link verified (validated=${NetState.isWifiValidated(this)})")
-                        homeSent = true
-                        Home.go(this)
-                    } else {
-                        update(getString(R.string.state_verifying))
-                        schedule(CONFIRM_MS)
-                        return
-                    }
+                    update(getString(R.string.state_verifying))
+                    schedule(CONFIRM_MS)
+                    return
+                } else {
+                    // Deliberately not gated on NET_CAPABILITY_VALIDATED: ZLauncher
+                    // strips INTERNET and VALIDATED from its own NetworkRequest because
+                    // the framework's opinion is exactly what is unreliable against a
+                    // PdaNet hotspot. Waiting on that probe would put a timeout in front
+                    // of every handoff. The gateway is the honest signal, and it is the
+                    // same one ZLauncher tests before raising the tunnel.
+                    Log.i(TAG, "link verified, pdanet=${NetState.isPdaNetLink(this)}")
+                    homeSent = true
+                    Home.go(this)
                 }
             }
 
-            update(getString(R.string.state_online, NetState.activeNetworkName(this)))
+            update(
+                if (NetState.isPdaNetLink(this)) getString(R.string.state_online_pdanet)
+                else getString(R.string.state_online, NetState.activeNetworkName(this))
+            )
             schedule(IDLE_POLL_MS)
             return
         }
@@ -204,8 +201,12 @@ class WifiWatchService : Service() {
                 update(getString(R.string.state_connecting))
                 schedule(ASSOCIATE_MS - sinceKick)
             } else {
+                // The radio is on and nothing saved was in range long enough to join.
+                // That is the point the automatic path has nothing left to try, so put
+                // the menu in front of the user -- once.
                 if (lastKick != 0L) strikes++
                 lastKick = 0L
+                showMenuOnce()
                 update(getString(R.string.state_waiting))
                 schedule(retryDelay())
             }
@@ -221,10 +222,24 @@ class WifiWatchService : Service() {
             update(getString(R.string.state_connecting))
             schedule(ASSOCIATE_MS)
         } else {
+            // Android 10/11: setWifiEnabled() is a no-op for third-party apps, so there
+            // is no automatic path at all. The menu is not a fallback here, it is the
+            // only way the radio gets switched on.
             strikes++
+            showMenuOnce()
             update(getString(R.string.state_blocked))
             schedule(retryDelay())
         }
+    }
+
+    private fun showMenuOnce() {
+        if (menuShown) return
+        if (!Home.canStartFromBackground(this)) {
+            Log.w(TAG, "cannot put the menu up from the background on this version")
+            return
+        }
+        menuShown = true
+        WifiMenu.open(this)
     }
 
     /** 20s, then 1 min, then 5 min. No point hammering a radio with nothing in range. */
@@ -283,8 +298,6 @@ class WifiWatchService : Service() {
         /** Passes the Wi-Fi link must hold before we press HOME, and the gap between. */
         private const val CONFIRMATIONS = 2
         private const val CONFIRM_MS = 4_000L
-        /** How long to wait on NET_CAPABILITY_VALIDATED before handing off without it. */
-        private const val VALIDATE_GRACE_MS = 20_000L
 
         fun start(context: Context) {
             val intent = Intent(context, WifiWatchService::class.java)
