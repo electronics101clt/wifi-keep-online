@@ -145,9 +145,14 @@ class WifiWatchService : Service() {
         // 1. CarPlay first. Always. While the hotspot is up, getWifiState() lies and
         //    says DISABLED, so checking Wi-Fi before the AP would read it backwards.
         if (NetState.isApActive(this)) {
+            // Purely passive. We used to call setWifiEnabled(false) here to "hand the
+            // radio back", but that is a write to the radio at the exact moment a
+            // projection session is starting -- the riskiest possible instant to touch
+            // it. The framework tears STA down itself when the AP comes up, so the call
+            // bought nothing and risked interfering with the thing it meant to protect.
+            // Detect the hotspot, record that we no longer own the radio, do nothing.
             if (weEnabledWifi) {
-                Log.i(TAG, "AP came up after our kick -- handing the radio back")
-                NetState.setWifi(this, false)
+                Log.i(TAG, "hotspot up -- standing down, radio is not ours")
                 weEnabledWifi = false
             }
             apEndedAt = 0L

@@ -54,8 +54,14 @@ and AP at the same time — switching client mode on would tear CarPlay's hotspo
 
 There is a trap here: while the AP is up, `getWifiState()` reports **DISABLED**. So the
 naive "Wi-Fi is off, I'll turn it on" read is exactly backwards at that moment. The AP
-check therefore runs *first* on every pass, and if the AP appears after we enabled the
-radio, we switch it back off and hand the chip back.
+check therefore runs *first* on every pass.
+
+The hotspot path is **purely passive — it detects, and does nothing else.** The app has
+no way to start or stop a hotspot: the only two AP calls in it are `isWifiApEnabled()`
+and `getWifiApState()`, both getters. It does not even switch its own client radio back
+off when a hotspot appears; that was a write to the radio at the exact moment a
+projection session starts, which is the riskiest possible instant to touch it, and the
+framework tears STA down by itself anyway.
 
 `NetState.isApActive()` leads with `WifiManager.isWifiApEnabled()` by reflection — the
 same call ZLauncher's `KeepAliveService` uses to decide whether to tear its tunnel down,
